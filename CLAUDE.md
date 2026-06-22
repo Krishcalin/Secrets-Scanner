@@ -10,7 +10,8 @@ tool — shared pattern intelligence, opposite direction.
 
 Maps to AccuKnox **SECURING SECRETS**.
 
-**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-2 complete (17 tests)
+**Repository**: https://github.com/Krishcalin/Secrets-Scanner
+**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-2 complete (28 rules, 17 tests)
 
 ---
 
@@ -31,9 +32,9 @@ secrets-scanner/
 │   ├── base.py                # BaseDetector ABC (detect / line_col)
 │   ├── signature.py           # YAML rule-pack regex detector
 │   └── entropy.py             # Shannon-entropy detector (opt-in)
-├── rules/secret_patterns.yaml # signature rule pack (id/desc/regex/severity/capture)
+├── rules/secret_patterns.yaml # 28 signature rules + allowlist section
 ├── config/                    # settings (later phases)
-└── tests/test_scanner.py
+└── tests/test_scanner.py      # 17 pytest tests
 ```
 
 ### Core contracts
@@ -41,19 +42,51 @@ secrets-scanner/
 - **`BaseDetector`** — `detect(path, content) -> list[Finding]`; works on full
   file content so multi-line secrets (PEM keys) match. Helper `line_col()` maps a
   match offset to 1-based line/column.
+- **`SignatureDetector(rules_path, allowlist)`** — compiles the YAML rule pack;
+  per match, applies the allowlist, then the rule's `min_entropy` gate, then emits
+  a `Finding` (with `verifier` in `metadata` when set).
+- **`EntropyDetector(min_entropy=4.0, allowlist)`** — opt-in; flags high-entropy,
+  mixed-alphabet tokens that signatures miss.
+- **`Allowlist(value_patterns, path_patterns)`** — `allows(secret, path)` suppresses
+  documentation samples / template placeholders. `Allowlist.default()` loads from
+  the rule pack's `allowlist:` section; `Allowlist.empty()` disables it.
 - **`Finding`** — `rule_id, description, severity, path, line, column, preview
-  (redacted), fingerprint, source, entropy, verification`.
+  (redacted), fingerprint, source, entropy, verification, metadata`.
 - **`fingerprint(rule_id, secret, path)`** — stable hash (no raw secret stored);
   used for dedup and baseline suppression, independent of line moves.
 - **`SecretScanner.scan(root)`** — walk → run detectors → dedup by fingerprint →
-  apply baseline → `ScanResult`.
+  apply baseline → `ScanResult`. `default_detectors(entropy=, allowlist=)` builds
+  the standard set.
+
+### Rule schema (`rules/secret_patterns.yaml`)
+
+```yaml
+patterns:
+  - id: openai_api_key          # unique id (also feeds the fingerprint)
+    description: OpenAI API key  # human-readable label
+    regex: "sk-(?!ant-)..."     # Python regex against full file content
+    severity: critical          # info | low | medium | high | critical
+    capture: 1                  # optional: group index of the secret value (0 = whole match)
+    min_entropy: 3.5            # optional: skip matches below this Shannon entropy
+    verifier: openai            # optional: Phase 5 live-verification hint → Finding.metadata
+allowlist:
+  value_patterns: ["example", "<[^>]+>", ...]   # regex vs. secret value (case-insensitive)
+  path_patterns: []                              # regex vs. file path (opt-in)
+```
+
+### CLI reference
+
+- `scan --path --entropy --no-allowlist --baseline <f> --format table|json --fail-on <sev>`
+- `baseline --path --entropy -o <out>` — snapshot fingerprints to suppress later
+- top-level `--log-level` on the `cli` group (default `WARNING`)
 
 ### Design principles
 
 1. **Secrets never leak** — store redacted previews + fingerprints, never the
    raw value, in findings, logs, baselines, or reports.
 2. **YAML-driven rules** — detections are data; add patterns without code changes.
-3. **Low-noise by default** — entropy detector is opt-in; walker skips binaries.
+3. **Low-noise by default** — allowlist on by default, generic rules entropy-gated,
+   entropy detector opt-in, walker skips binaries/oversized/noise dirs.
 4. **Safe by default** — detection is read-only; live verification (Phase 5) is
    opt-in and rate-limited, never exfiltrates.
 5. **CI-first** — `--fail-on` gate and (Phase 6) pre-commit hook.
@@ -72,7 +105,7 @@ secrets-scanner/
 - [x] 10 pytest tests
 
 ### Phase 2 — Detector breadth (COMPLETE)
-- [x] Expanded `secret_patterns.yaml` to 27 rules — added OpenAI, Anthropic,
+- [x] Expanded `secret_patterns.yaml` to 28 rules — added OpenAI, Anthropic,
       Azure storage key, GCP SA JSON + OAuth client secret, Twilio, SendGrid,
       Mailgun, Telegram, Shopify, DigitalOcean, npm, PyPI, GitLab PAT,
       GitHub OAuth/app/refresh tokens
