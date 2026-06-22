@@ -12,6 +12,7 @@ import math
 import re
 from collections import Counter
 
+from core.allowlist import Allowlist
 from core.models import Finding, Severity, fingerprint, redact
 from detectors.base import BaseDetector
 
@@ -29,8 +30,9 @@ def shannon_entropy(s: str) -> float:
 class EntropyDetector(BaseDetector):
     DETECTOR_ID = "entropy"
 
-    def __init__(self, min_entropy: float = 4.0) -> None:
+    def __init__(self, min_entropy: float = 4.0, allowlist: Allowlist | None = None) -> None:
         self.min_entropy = min_entropy
+        self.allowlist = allowlist if allowlist is not None else Allowlist.empty()
 
     def detect(self, path: str, content: str) -> list[Finding]:
         findings: list[Finding] = []
@@ -38,6 +40,8 @@ class EntropyDetector(BaseDetector):
             tok = m.group(0)
             # require a mixed alphabet — pure words / hex-only runs are noisy
             if not (any(c.isdigit() for c in tok) and any(c.isalpha() for c in tok)):
+                continue
+            if self.allowlist.allows(tok, path):
                 continue
             e = shannon_entropy(tok)
             if e < self.min_entropy:

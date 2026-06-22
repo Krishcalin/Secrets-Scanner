@@ -29,22 +29,26 @@ def cli(log_level: str) -> None:
     configure_logging(log_level)
 
 
-def _scanner(entropy: bool, baseline_path: str | None) -> SecretScanner:
+def _scanner(entropy: bool, baseline_path: str | None, allowlist: bool = True) -> SecretScanner:
     baseline = Baseline.load(baseline_path) if baseline_path else None
-    return SecretScanner(default_detectors(entropy=entropy), baseline=baseline)
+    return SecretScanner(
+        default_detectors(entropy=entropy, allowlist=allowlist), baseline=baseline
+    )
 
 
 @cli.command("scan")
 @click.option("--path", default=".", help="File or directory to scan.")
 @click.option("--entropy", is_flag=True, default=False, help="Also run the entropy detector.")
+@click.option("--no-allowlist", is_flag=True, default=False,
+              help="Report even documentation/placeholder sample values.")
 @click.option("--baseline", "baseline_path", default=None, help="Baseline JSON to suppress.")
 @click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
 @click.option("--fail-on", type=click.Choice([s.value for s in Severity]), default=None,
               help="Exit 1 if any finding is at/above this severity (CI gate).")
-def scan(path: str, entropy: bool, baseline_path: str | None, fmt: str,
+def scan(path: str, entropy: bool, no_allowlist: bool, baseline_path: str | None, fmt: str,
          fail_on: str | None) -> None:
     """Scan PATH for hardcoded secrets."""
-    result = _scanner(entropy, baseline_path).scan(path)
+    result = _scanner(entropy, baseline_path, allowlist=not no_allowlist).scan(path)
 
     if fmt == "json":
         console.print_json(data={
@@ -55,7 +59,8 @@ def scan(path: str, entropy: bool, baseline_path: str | None, fmt: str,
             "findings": [{
                 "rule_id": f.rule_id, "severity": f.severity.value, "path": f.path,
                 "line": f.line, "preview": f.preview, "fingerprint": f.fingerprint,
-                "description": f.description,
+                "description": f.description, "entropy": f.entropy,
+                "verifier": f.metadata.get("verifier"),
             } for f in result.findings],
         })
     else:

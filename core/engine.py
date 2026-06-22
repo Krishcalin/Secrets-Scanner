@@ -53,12 +53,18 @@ class SecretScanner:
         return result
 
 
-def default_detectors(entropy: bool = False) -> list[BaseDetector]:
-    """Built-in detector set. Entropy is opt-in (noisier than signatures)."""
+def default_detectors(entropy: bool = False, allowlist: bool = True) -> list[BaseDetector]:
+    """Built-in detector set. Entropy is opt-in (noisier than signatures).
+
+    The allowlist (documentation/placeholder suppression) is on by default; pass
+    ``allowlist=False`` to report even obvious sample values.
+    """
+    from core.allowlist import Allowlist
     from detectors.entropy import EntropyDetector
     from detectors.signature import SignatureDetector
 
-    detectors: list[BaseDetector] = [SignatureDetector()]
+    al = Allowlist.default() if allowlist else Allowlist.empty()
+    detectors: list[BaseDetector] = [SignatureDetector(allowlist=al)]
     if entropy:
-        detectors.append(EntropyDetector())
+        detectors.append(EntropyDetector(allowlist=al))
     return detectors

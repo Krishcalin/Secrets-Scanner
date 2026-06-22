@@ -10,7 +10,7 @@ tool — shared pattern intelligence, opposite direction.
 
 Maps to AccuKnox **SECURING SECRETS**.
 
-**Python**: 3.10+ · **License**: MIT · **Status**: Phase 1 complete (10 tests)
+**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-2 complete (17 tests)
 
 ---
 
@@ -25,6 +25,7 @@ secrets-scanner/
 │   ├── walker.py              # walk_files() — skip binaries/noise/oversized
 │   ├── engine.py              # SecretScanner + default_detectors()
 │   ├── baseline.py            # Baseline load/write/suppress (fingerprint set)
+│   ├── allowlist.py           # Allowlist — placeholder/example/template suppression
 │   └── logger.py              # structlog setup (never logs raw secrets)
 ├── detectors/
 │   ├── base.py                # BaseDetector ABC (detect / line_col)
@@ -70,11 +71,16 @@ secrets-scanner/
 - [x] CLI: `scan` (table/json, `--fail-on` gate), `baseline`
 - [x] 10 pytest tests
 
-### Phase 2 — Detector breadth
-- [ ] Expand `secret_patterns.yaml` (Azure, GCP SA JSON, Twilio, SendGrid,
-      npm/PyPI tokens, OpenAI/Anthropic keys, high-confidence cloud formats)
-- [ ] Per-rule entropy gating + verifier hints metadata
-- [ ] Allowlist patterns (example/test/placeholder suppression)
+### Phase 2 — Detector breadth (COMPLETE)
+- [x] Expanded `secret_patterns.yaml` to 27 rules — added OpenAI, Anthropic,
+      Azure storage key, GCP SA JSON + OAuth client secret, Twilio, SendGrid,
+      Mailgun, Telegram, Shopify, DigitalOcean, npm, PyPI, GitLab PAT,
+      GitHub OAuth/app/refresh tokens
+- [x] Per-rule `min_entropy` gating + `verifier` hint metadata (→ Finding.metadata)
+- [x] `core/allowlist.py` — value/path allowlist (example/placeholder/template
+      suppression), on by default; `scan --no-allowlist` to disable
+- [x] Allowlist wired into both signature + entropy detectors and `default_detectors`
+- [x] 7 new pytest tests (17 total)
 
 ### Phase 3 — Git-history scanning
 - [ ] Scan full commit history (`git log -p` / blob walk) for leaked-then-removed
