@@ -11,7 +11,7 @@ tool — shared pattern intelligence, opposite direction.
 Maps to AccuKnox **SECURING SECRETS**.
 
 **Repository**: https://github.com/Krishcalin/Secrets-Scanner
-**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-2 complete (28 rules, 17 tests)
+**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-3 complete (28 rules, 24 tests)
 
 ---
 
@@ -25,6 +25,7 @@ secrets-scanner/
 │   │                          #   redact(), fingerprint()
 │   ├── walker.py              # walk_files() — skip binaries/noise/oversized
 │   ├── engine.py              # SecretScanner + default_detectors()
+│   ├── git_history.py         # GitHistoryScanner — scan commit diffs (added lines)
 │   ├── baseline.py            # Baseline load/write/suppress (fingerprint set)
 │   ├── allowlist.py           # Allowlist — placeholder/example/template suppression
 │   └── logger.py              # structlog setup (never logs raw secrets)
@@ -34,7 +35,8 @@ secrets-scanner/
 │   └── entropy.py             # Shannon-entropy detector (opt-in)
 ├── rules/secret_patterns.yaml # 28 signature rules + allowlist section
 ├── config/                    # settings (later phases)
-└── tests/test_scanner.py      # 17 pytest tests
+├── tests/test_scanner.py      # filesystem/detector/baseline tests (17)
+└── tests/test_git_history.py  # git-history tests (7)
 ```
 
 ### Core contracts
@@ -57,6 +59,12 @@ secrets-scanner/
 - **`SecretScanner.scan(root)`** — walk → run detectors → dedup by fingerprint →
   apply baseline → `ScanResult`. `default_detectors(entropy=, allowlist=)` builds
   the standard set.
+- **`GitHistoryScanner.scan(repo)`** — parses one `git log --all -p --unified=0`
+  stream; per (commit, file) reconstructs the *added* lines into a blob (keeping a
+  line map for accurate new-file line numbers), runs the same detectors, dedups by
+  fingerprint (oldest commit wins via `--reverse`), and stamps each Finding with
+  `source="git-history"` + commit/author metadata. Catches leaked-then-removed
+  secrets. `max_commits` caps the walk.
 
 ### Rule schema (`rules/secret_patterns.yaml`)
 
@@ -77,6 +85,8 @@ allowlist:
 ### CLI reference
 
 - `scan --path --entropy --no-allowlist --baseline <f> --format table|json --fail-on <sev>`
+- `history --path --entropy --no-allowlist --baseline <f> --max-commits <n> --format --fail-on`
+  — scan git commit history (incl. leaked-then-removed secrets)
 - `baseline --path --entropy -o <out>` — snapshot fingerprints to suppress later
 - top-level `--log-level` on the `cli` group (default `WARNING`)
 
@@ -115,9 +125,17 @@ allowlist:
 - [x] Allowlist wired into both signature + entropy detectors and `default_detectors`
 - [x] 7 new pytest tests (17 total)
 
-### Phase 3 — Git-history scanning
-- [ ] Scan full commit history (`git log -p` / blob walk) for leaked-then-removed
-      secrets; `source="git-history"` with commit + author metadata
+### Phase 3 — Git-history scanning (COMPLETE)
+- [x] `core/git_history.py` — `GitHistoryScanner` parses a single
+      `git log --all --no-merges --reverse -p --unified=0` stream
+- [x] Detects secrets in each commit's *added* lines → catches leaked-then-removed
+      credentials the working tree no longer contains
+- [x] Accurate new-file line numbers (per-file line map), multi-line secrets supported
+- [x] `source="git-history"` + commit/author/email/date/summary in `Finding.metadata`
+- [x] Reuses signature + entropy detectors, allowlist, baseline; dedup oldest-wins
+- [x] CLI `history` command (`--max-commits`, table adds Commit column, JSON adds
+      source/commit/author/date); shared `_emit()` render+gate with `scan`
+- [x] `ScanResult.commits_scanned`; 7 new pytest tests (24 total)
 
 ### Phase 4 — Triage & suppression
 - [ ] `.gitignore`-aware walking; inline `# pragma: allowlist secret`

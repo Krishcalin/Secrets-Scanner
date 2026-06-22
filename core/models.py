@@ -63,6 +63,7 @@ class ScanResult:
     findings: list[Finding] = field(default_factory=list)
     files_scanned: int = 0
     files_skipped: int = 0
+    commits_scanned: int = 0          # populated by git-history scans
 
     def by_severity(self) -> dict[str, int]:
         counts: dict[str, int] = {}

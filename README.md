@@ -6,14 +6,14 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-17%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-24%20passing-brightgreen.svg)](tests/)
 
 Secrets Scanner is the **defensive mirror** of the offensive
 **T1552.001 "Credentials in Files"** module in the KIZEN red-team portfolio: that
 tool finds the gaps, this one closes them — sharing the same pattern intelligence
 in the opposite direction. It maps to the AccuKnox **SECURING SECRETS** capability.
 
-**Status:** Phases 1–2 complete (filesystem scanning + detector breadth) ·
+**Status:** Phases 1–3 complete (filesystem + git-history scanning) ·
 **Python** 3.10+ · **License** MIT
 
 ---
@@ -52,6 +52,18 @@ in the opposite direction. It maps to the AccuKnox **SECURING SECRETS** capabili
   signature matches, catching unknown/novel key formats.
 - **Verifier hints** — rules carry a `verifier` tag (`aws_sts`, `github_user`,
   `openai`, …) for the planned Phase 5 live-verification, surfaced in JSON output.
+
+### Git-history scanning
+
+- **`history` command** — walks **every commit on every ref** and scans each
+  commit's *added* lines, so a secret is caught at the commit that introduced it
+  **even if a later commit deleted it** (the value still lives in history and is
+  recoverable). Findings carry `source="git-history"` plus the commit hash,
+  author, email, date, and message — so you know where the leak entered and whose
+  key to rotate.
+- Accurate new-file line numbers and multi-line secret support; reuses the same
+  signature/entropy detectors, allowlist, and baseline as filesystem scans.
+- `--max-commits N` caps the walk for large repos.
 
 ### Noise control
 
@@ -106,6 +118,11 @@ python main.py scan --path . --fail-on high
 # Create a baseline of existing findings, then scan suppressing them
 python main.py baseline --path . -o .secrets-baseline.json
 python main.py scan --path . --baseline .secrets-baseline.json
+
+# Scan the full git history (catches leaked-then-removed secrets)
+python main.py history --path .
+python main.py history --path . --max-commits 500 --format json
+python main.py history --path . --fail-on high       # CI gate on history too
 ```
 
 ### `scan` options
@@ -119,6 +136,10 @@ python main.py scan --path . --baseline .secrets-baseline.json
 | `--format table\|json` | `table` | Output format |
 | `--fail-on <severity>` | — | Exit 1 if any finding is at/above this severity |
 | `--log-level` | `WARNING` | Set on the top-level `cli` group |
+
+`history` takes the same options plus `--max-commits N` (limit the walk to the
+most recent N commits). Its table adds a **Commit** column; its JSON adds
+`source`, `commit`, `author`, and `date` per finding.
 
 ### Example JSON finding
 
@@ -153,6 +174,11 @@ walk_files(root)  →  detectors  →  dedup (fingerprint)  →  baseline filter
    a `Finding` with a redacted preview + fingerprint.
 4. **Dedup** by fingerprint, then drop anything in the **baseline**.
 5. Render **table/JSON**, and optionally enforce the **`--fail-on` gate**.
+
+The `history` command swaps step 1 for a `git log --all -p` walk: it reconstructs
+the *added* lines of each commit (per file, with a line map for accurate line
+numbers), runs the same detectors, and attributes each finding to the introducing
+commit — so deleted-but-historical secrets still surface.
 
 ---
 
@@ -192,6 +218,7 @@ secrets-scanner/
 │   ├── models.py               # Severity, Verification, Finding, ScanResult, redact(), fingerprint()
 │   ├── walker.py               # walk_files() — skip binaries/noise/oversized
 │   ├── engine.py               # SecretScanner + default_detectors()
+│   ├── git_history.py          # GitHistoryScanner — scan commit diffs (added lines)
 │   ├── baseline.py             # Baseline load/write/suppress (fingerprint set)
 │   ├── allowlist.py            # Allowlist — placeholder/example/template suppression
 │   └── logger.py               # structlog setup (never logs raw secrets)
@@ -200,7 +227,7 @@ secrets-scanner/
 │   ├── signature.py            # YAML rule-pack regex detector
 │   └── entropy.py              # Shannon-entropy detector (opt-in)
 ├── rules/secret_patterns.yaml  # 28 signature rules + allowlist
-└── tests/test_scanner.py       # 17 pytest tests
+└── tests/                      # 24 pytest tests (test_scanner.py, test_git_history.py)
 ```
 
 See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
@@ -213,7 +240,7 @@ See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
 |------:|-------|--------|
 | 1 | Filesystem scanning foundation | ✅ Complete |
 | 2 | Detector breadth (28 rules, entropy gating, verifier hints, allowlist) | ✅ Complete |
-| 3 | Git-history scanning (leaked-then-removed secrets) | Planned |
+| 3 | Git-history scanning (leaked-then-removed secrets) | ✅ Complete |
 | 4 | Triage & suppression (`.gitignore`-aware, inline `# pragma: allowlist secret`) | Planned |
 | 5 | Safe live verification (AWS STS, GitHub `/user`, … — rate-limited, read-only) | Planned |
 | 6 | HTML/JSON/CSV reports, pre-commit hook, CI gate, CWE-798/OWASP/PCI-DSS mapping | Planned |
@@ -223,9 +250,12 @@ See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
 ## Testing
 
 ```bash
-pytest                # 17 tests
+pytest                # 24 tests
 pytest --cov=core --cov=detectors
 ```
+
+The git-history tests spin up throwaway repos and are skipped automatically if
+`git` is not on `PATH`.
 
 ---
 
