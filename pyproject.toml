@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "secrets-scanner"
+version = "0.1.0"
+description = "Detect hardcoded credentials and secrets across source, config, and git history — with safe live-verification and SIEM/CI integration."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Krishnendu De" }]
+keywords = ["secrets-detection", "credential-scanning", "dlp", "appsec", "ci-security", "pre-commit"]
+
+dependencies = [
+    "pyyaml>=6.0",
+    "click>=8.0",
+    "rich>=13.0",
+    "structlog>=23.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0", "pytest-cov>=4.0"]
+
+[project.scripts]
+secrets-scan = "main:cli"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["core*", "detectors*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
