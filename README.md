@@ -35,7 +35,7 @@ them, sharing the same pattern intelligence. Maps to the AccuKnox
 ## Install
 
 ```bash
-git clone https://github.com/<owner>/Secrets-Scanner.git
+git clone https://github.com/Krishcalin/Secrets-Scanner.git
 cd Secrets-Scanner
 pip install -r requirements.txt        # or:  pip install -e ".[test]"
 ```
