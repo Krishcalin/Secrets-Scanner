@@ -1,0 +1,16 @@
+# Consumer-facing pre-commit hook definition.
+# Add to a project's .pre-commit-config.yaml:
+#
+#   repos:
+#     - repo: https://github.com/Krishcalin/Secrets-Scanner
+#       rev: v0.1.0
+#       hooks:
+#         - id: secrets-scan
+#
+- id: secrets-scan
+  name: Secrets Scanner
+  description: Scan the working tree for hardcoded secrets; block the commit on HIGH+.
+  entry: secrets-scan scan --gitignore --fail-on high
+  language: python
+  pass_filenames: false
+  always_run: true

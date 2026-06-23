@@ -11,7 +11,7 @@ tool — shared pattern intelligence, opposite direction.
 Maps to AccuKnox **SECURING SECRETS**.
 
 **Repository**: https://github.com/Krishcalin/Secrets-Scanner
-**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-5 complete (28 rules, 41 tests)
+**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-6 COMPLETE (28 rules, 51 tests)
 
 ---
 
@@ -31,16 +31,22 @@ secrets-scanner/
 │   ├── pragma.py              # inline `# pragma: allowlist secret` line suppression
 │   ├── gitignore.py           # .gitignore-aware filtering (delegates to git check-ignore)
 │   ├── verify.py              # live verification — Verifier/Runner, raw-secret recovery
+│   ├── reporter.py            # JSON/CSV/HTML reports (inline HTML, no Jinja2 dep)
+│   ├── compliance.py          # CWE-798/321/522, OWASP, PCI DSS, NIST 800-53 mapping
 │   └── logger.py              # structlog setup (never logs raw secrets)
 ├── detectors/
 │   ├── base.py                # BaseDetector ABC (detect / line_col)
-│   ├── signature.py           # YAML rule-pack regex detector
+│   ├── signature.py           # YAML rule-pack regex detector (+ rule_index())
 │   └── entropy.py             # Shannon-entropy detector (opt-in)
 ├── rules/secret_patterns.yaml # 28 signature rules + allowlist section
-├── config/                    # settings (later phases)
+├── .pre-commit-hooks.yaml     # consumer pre-commit hook (id: secrets-scan)
+├── .github/workflows/ci.yml   # pytest matrix (3.10-3.12) + self-scan gate
+├── .secrets-baseline.json     # accepts repo's own test fixtures (for the CI gate)
 ├── tests/test_scanner.py      # filesystem/detector/baseline/triage tests (24)
 ├── tests/test_git_history.py  # git-history + gitignore tests (7)
-└── tests/test_verify.py       # live-verification tests (10, no network)
+├── tests/test_verify.py       # live-verification tests (10, no network)
+├── tests/test_compliance.py   # compliance mapping tests (4)
+└── tests/test_reporter.py     # JSON/CSV/HTML report tests (6)
 ```
 
 ### Core contracts
@@ -78,6 +84,14 @@ secrets-scanner/
   in memory only, never stored. Status-clean providers only: GitHub, GitLab, OpenAI,
   Anthropic, Stripe, SendGrid (Slack-style "200-on-invalid" APIs are intentionally
   excluded). Sets `Finding.verification` → VALID / INVALID / UNVERIFIED / SKIPPED.
+- **Reporting (`core/reporter.py`)** — `result_to_dict()` is the canonical payload
+  (shared by CLI JSON console + JSON report so they never drift); `to_csv()`,
+  `to_html()` (self-contained dark theme, no Jinja2, everything HTML-escaped),
+  `write_report(path)` dispatches by extension (.json/.csv/.html). All use redacted
+  previews — raw secrets never appear in a report.
+- **Compliance (`core/compliance.py`)** — `controls_for(rule_id)` maps a rule to
+  CWE (798/321/522), OWASP Top 10 2021, PCI DSS v4.0, NIST 800-53; `summarize()`
+  rolls findings up per framework for the report.
 - **`GitHistoryScanner.scan(repo)`** — parses one `git log --all -p --unified=0`
   stream; per (commit, file) reconstructs the *added* lines into a blob (keeping a
   line map for accurate new-file line numbers), runs the same detectors, dedups by
@@ -103,7 +117,8 @@ allowlist:
 
 ### CLI reference
 
-- `scan --path --entropy --no-allowlist --gitignore --baseline <f> --format table|json --fail-on <sev>`
+- `scan --path --entropy --no-allowlist --gitignore --baseline <f> --format table|json --report <file> --fail-on <sev>`
+  (`--report` infers .html/.json/.csv from extension; available on scan/history/verify)
 - `history --path --entropy --no-allowlist --baseline <f> --max-commits <n> --format --fail-on`
   — scan git commit history (incl. leaked-then-removed secrets)
 - `verify --path --entropy --no-allowlist --gitignore --baseline <f> --rate-limit <s>
@@ -185,10 +200,19 @@ allowlist:
 - Note: AWS (`aws_sts`) intentionally unverified — needs secret-key pairing + SigV4;
   Slack excluded (auth.test returns HTTP 200 even for invalid tokens)
 
-### Phase 6 — Reporting, hooks & GRC
-- [ ] HTML/JSON/CSV reports (reuse Guardrail reporter pattern)
-- [ ] Pre-commit hook + GitHub Actions CI gate
-- [ ] Compliance mapping (CWE-798 Hardcoded Credentials, OWASP, PCI-DSS 8.2)
+### Phase 6 — Reporting, hooks & GRC (COMPLETE)
+- [x] `core/reporter.py` — JSON/CSV/self-contained HTML reports (no Jinja2 dep);
+      `--report <file>` on scan/history/verify (format by extension)
+- [x] `core/compliance.py` — CWE-798/321/522, OWASP Top 10 2021, PCI DSS v4.0,
+      NIST 800-53 mapping; rolled into every report
+- [x] `.pre-commit-hooks.yaml` (id: secrets-scan) + README adoption snippet
+- [x] `.github/workflows/ci.yml` — pytest matrix (3.10-3.12) + self-scan gate
+- [x] `.secrets-baseline.json` — accepts the repo's own test fixtures so the gate
+      fails only on NEW secrets (dogfoods the baseline feature)
+- [x] 10 new pytest tests (51 total)
+
+**All 6 planned phases complete.** Possible future work: more verifiers (AWS SigV4,
+Slack body-parse), SARIF output, per-rule HTML detail pages.
 
 ---
 

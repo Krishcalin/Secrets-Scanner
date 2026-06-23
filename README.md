@@ -6,15 +6,15 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-41%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-51%20passing-brightgreen.svg)](tests/)
 
 Secrets Scanner is the **defensive mirror** of the offensive
 **T1552.001 "Credentials in Files"** module in the KIZEN red-team portfolio: that
 tool finds the gaps, this one closes them — sharing the same pattern intelligence
 in the opposite direction. It maps to the AccuKnox **SECURING SECRETS** capability.
 
-**Status:** Phases 1–5 complete (filesystem + git-history scanning, triage, live verification) ·
-**Python** 3.10+ · **License** MIT
+**Status:** All 6 phases complete — filesystem + git-history scanning, triage, live
+verification, reporting & GRC · **Python** 3.10+ · **License** MIT
 
 ---
 
@@ -96,11 +96,29 @@ in the opposite direction. It maps to the AccuKnox **SECURING SECRETS** capabili
 - **Fast walker** — skips binaries (null-byte sniff + extension list), files > 5 MB,
   and noise dirs (`.git`, `node_modules`, `venv`, `dist`, `vendor`, `.terraform`, …).
 
+### Reporting & GRC
+
+- **Reports** — `--report <file>` writes a **JSON**, **CSV**, or self-contained
+  dark-themed **HTML** report (format inferred from the extension) with an executive
+  summary, a compliance roll-up, and the findings table. No Jinja2 dependency;
+  previews stay redacted.
+- **Compliance mapping** — every finding is tied to **CWE-798/321/522**, **OWASP
+  Top 10 (2021)**, **PCI DSS v4.0** (8.6.2 / 6.2.4), and **NIST 800-53** (IA-5 /
+  SC-12) controls, rolled up in the report so a scan doubles as audit evidence.
+
+### CI / pre-commit integration
+
+- **Pre-commit hook** — ships a `.pre-commit-hooks.yaml` (`id: secrets-scan`) so
+  any repo can block commits that introduce HIGH+ secrets.
+- **GitHub Actions** — `.github/workflows/ci.yml` runs the test matrix (3.10–3.12)
+  plus a self-scan gate; a committed `.secrets-baseline.json` accepts the repo's own
+  test fixtures so the gate fails only on a *new* secret.
+
 ### Output & integration
 
-- **Table** (rich) for humans, **JSON** for tooling/SIEM.
+- **Table** (rich) for humans, **JSON** for tooling/SIEM, file **reports** via `--report`.
 - **CI gate** — `--fail-on <severity>` exits non-zero when any finding is at or
-  above the threshold.
+  above the threshold (`--fail-on-valid` on `verify` for confirmed-live keys).
 
 ---
 
@@ -153,6 +171,33 @@ python main.py history --path . --fail-on high       # CI gate on history too
 # Verify whether detected credentials are actually LIVE (read-only, opt-in)
 python main.py verify --path .                       # prompts before any request
 python main.py verify --path . --yes --fail-on-valid # CI: break the build on a live key
+
+# Write a report (format inferred from the extension)
+python main.py scan --path . --report report.html
+python main.py history --path . --report history.json
+python main.py scan --path . --report findings.csv
+```
+
+### Pre-commit hook
+
+Add to a project's `.pre-commit-config.yaml`:
+
+```yaml
+repos:
+  - repo: https://github.com/Krishcalin/Secrets-Scanner
+    rev: v0.1.0
+    hooks:
+      - id: secrets-scan
+```
+
+### GitHub Actions
+
+This repo's [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the test
+matrix and a secrets self-scan gate. To gate your own repo:
+
+```yaml
+- run: pip install secrets-scanner   # or: pip install -e <path>
+- run: secrets-scan scan --gitignore --baseline .secrets-baseline.json --fail-on high
 ```
 
 ### `scan` options
@@ -273,17 +318,19 @@ secrets-scanner/
 │   ├── engine.py               # SecretScanner + default_detectors()
 │   ├── git_history.py          # GitHistoryScanner — scan commit diffs (added lines)
 │   ├── verify.py               # live verification — Verifier/Runner, raw-secret recovery
+│   ├── reporter.py             # JSON/CSV/HTML reports (inline HTML, no Jinja2)
+│   ├── compliance.py           # CWE/OWASP/PCI-DSS/NIST control mapping
 │   ├── baseline.py             # Baseline load/write/suppress + incremental --update
 │   ├── allowlist.py            # Allowlist — placeholder/example/template suppression
 │   ├── pragma.py               # inline `# pragma: allowlist secret` suppression
 │   ├── gitignore.py            # .gitignore-aware filtering (git check-ignore)
 │   └── logger.py               # structlog setup (never logs raw secrets)
-├── detectors/
-│   ├── base.py                 # BaseDetector ABC (detect / line_col)
-│   ├── signature.py            # YAML rule-pack regex detector
-│   └── entropy.py              # Shannon-entropy detector (opt-in)
+├── detectors/                  # BaseDetector, signature (YAML rules), entropy
 ├── rules/secret_patterns.yaml  # 28 signature rules + allowlist
-└── tests/                      # 41 pytest tests (scanner, git_history, verify)
+├── .pre-commit-hooks.yaml      # consumer pre-commit hook (id: secrets-scan)
+├── .github/workflows/ci.yml    # test matrix + self-scan gate
+├── .secrets-baseline.json      # accepts this repo's own test fixtures
+└── tests/                      # 51 pytest tests (scanner, git_history, verify, reporter, compliance)
 ```
 
 See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
@@ -299,14 +346,14 @@ See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
 | 3 | Git-history scanning (leaked-then-removed secrets) | ✅ Complete |
 | 4 | Triage & suppression (`.gitignore`-aware, inline pragmas, baseline merge) | ✅ Complete |
 | 5 | Safe live verification (GitHub, GitLab, OpenAI, Anthropic, Stripe, SendGrid — rate-limited, read-only) | ✅ Complete |
-| 6 | HTML/JSON/CSV reports, pre-commit hook, CI gate, CWE-798/OWASP/PCI-DSS mapping | Planned |
+| 6 | HTML/JSON/CSV reports, pre-commit hook, CI gate, CWE-798/OWASP/PCI-DSS mapping | ✅ Complete |
 
 ---
 
 ## Testing
 
 ```bash
-pytest                # 41 tests
+pytest                # 51 tests
 pytest --cov=core --cov=detectors
 ```
 
