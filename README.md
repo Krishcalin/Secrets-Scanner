@@ -1,19 +1,19 @@
 # Secrets Scanner
 
-> Detect hardcoded credentials and secrets across source, config, and (soon) git
-> history — with redacted reporting, allowlist tuning, baseline suppression, and a
-> CI fail-gate.
+> Detect hardcoded credentials and secrets across source, config, and git
+> history — with redacted reporting, allowlist tuning, baseline suppression,
+> opt-in live verification, and a CI fail-gate.
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-31%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-41%20passing-brightgreen.svg)](tests/)
 
 Secrets Scanner is the **defensive mirror** of the offensive
 **T1552.001 "Credentials in Files"** module in the KIZEN red-team portfolio: that
 tool finds the gaps, this one closes them — sharing the same pattern intelligence
 in the opposite direction. It maps to the AccuKnox **SECURING SECRETS** capability.
 
-**Status:** Phases 1–4 complete (filesystem + git-history scanning, triage/suppression) ·
+**Status:** Phases 1–5 complete (filesystem + git-history scanning, triage, live verification) ·
 **Python** 3.10+ · **License** MIT
 
 ---
@@ -51,7 +51,21 @@ in the opposite direction. It maps to the AccuKnox **SECURING SECRETS** capabili
 - **Entropy detector** *(opt-in, `--entropy`)* — flags high-entropy strings that no
   signature matches, catching unknown/novel key formats.
 - **Verifier hints** — rules carry a `verifier` tag (`aws_sts`, `github_user`,
-  `openai`, …) for the planned Phase 5 live-verification, surfaced in JSON output.
+  `openai`, …) that drive live verification, surfaced in JSON output.
+
+### Live verification *(opt-in)*
+
+- **`verify` command** — after scanning, makes a single **read-only** request per
+  unique secret to its own provider and reports whether the credential is actually
+  **live**: `VALID` (rotate now!), `INVALID`, `UNVERIFIED` (couldn't tell), or
+  `SKIPPED` (no verifier for that type).
+- **Providers:** GitHub, GitLab, OpenAI, Anthropic, Stripe, SendGrid.
+- **Safe by construction:** opt-in command requiring confirmation; read-only
+  endpoints only; a secret is sent only to its own provider; redirects are never
+  followed (no header leakage); per-call timeout + rate limiting; network errors
+  fail safe to `UNVERIFIED` (never a false `INVALID`); raw secrets are recovered
+  into memory only for the call and **never logged or stored**.
+- **`--fail-on-valid`** turns "a live credential is in the code" into a build break.
 
 ### Git-history scanning
 
@@ -135,6 +149,10 @@ python main.py baseline --path . -o .secrets-baseline.json --update --reason "tr
 python main.py history --path .
 python main.py history --path . --max-commits 500 --format json
 python main.py history --path . --fail-on high       # CI gate on history too
+
+# Verify whether detected credentials are actually LIVE (read-only, opt-in)
+python main.py verify --path .                       # prompts before any request
+python main.py verify --path . --yes --fail-on-valid # CI: break the build on a live key
 ```
 
 ### `scan` options
@@ -154,6 +172,12 @@ python main.py history --path . --fail-on high       # CI gate on history too
 most recent N commits). Its table adds a **Commit** column; its JSON adds
 `source`, `commit`, `author`, and `date` per finding.
 
+`verify` takes the scan options plus `--rate-limit <s>` (pause between calls,
+default 1.0), `--timeout <s>` (per-call, default 8.0), `-y/--yes` (skip the
+confirmation prompt — required for non-interactive/CI use), and `--fail-on-valid`
+(exit 1 if any credential is confirmed live). Its table adds a **Status** column;
+every command's JSON now includes a `verification` field per finding.
+
 ### Example JSON finding
 
 ```json
@@ -166,7 +190,8 @@ most recent N commits). Its table adds a **Commit** column; its JSON adds
   "fingerprint": "9f2c1a7b6e4d0c83",
   "description": "AWS Access Key ID",
   "entropy": null,
-  "verifier": "aws_sts"
+  "verifier": "aws_sts",
+  "verification": "skipped"
 }
 ```
 
@@ -241,12 +266,13 @@ allowlist:
 
 ```
 secrets-scanner/
-├── main.py                     # Click CLI: scan, baseline
+├── main.py                     # Click CLI: scan, history, verify, baseline
 ├── core/
 │   ├── models.py               # Severity, Verification, Finding, ScanResult, redact(), fingerprint()
 │   ├── walker.py               # walk_files() — skip binaries/noise/oversized
 │   ├── engine.py               # SecretScanner + default_detectors()
 │   ├── git_history.py          # GitHistoryScanner — scan commit diffs (added lines)
+│   ├── verify.py               # live verification — Verifier/Runner, raw-secret recovery
 │   ├── baseline.py             # Baseline load/write/suppress + incremental --update
 │   ├── allowlist.py            # Allowlist — placeholder/example/template suppression
 │   ├── pragma.py               # inline `# pragma: allowlist secret` suppression
@@ -257,7 +283,7 @@ secrets-scanner/
 │   ├── signature.py            # YAML rule-pack regex detector
 │   └── entropy.py              # Shannon-entropy detector (opt-in)
 ├── rules/secret_patterns.yaml  # 28 signature rules + allowlist
-└── tests/                      # 24 pytest tests (test_scanner.py, test_git_history.py)
+└── tests/                      # 41 pytest tests (scanner, git_history, verify)
 ```
 
 See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
@@ -272,7 +298,7 @@ See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
 | 2 | Detector breadth (28 rules, entropy gating, verifier hints, allowlist) | ✅ Complete |
 | 3 | Git-history scanning (leaked-then-removed secrets) | ✅ Complete |
 | 4 | Triage & suppression (`.gitignore`-aware, inline pragmas, baseline merge) | ✅ Complete |
-| 5 | Safe live verification (AWS STS, GitHub `/user`, … — rate-limited, read-only) | Planned |
+| 5 | Safe live verification (GitHub, GitLab, OpenAI, Anthropic, Stripe, SendGrid — rate-limited, read-only) | ✅ Complete |
 | 6 | HTML/JSON/CSV reports, pre-commit hook, CI gate, CWE-798/OWASP/PCI-DSS mapping | Planned |
 
 ---
@@ -280,21 +306,26 @@ See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
 ## Testing
 
 ```bash
-pytest                # 31 tests
+pytest                # 41 tests
 pytest --cov=core --cov=detectors
 ```
 
 The git-history tests spin up throwaway repos and are skipped automatically if
-`git` is not on `PATH`.
+`git` is not on `PATH`. The verification tests inject a fake HTTP layer and make
+**no real network calls**.
 
 ---
 
 ## Safety & responsible use
 
-This tool is **read-only**: it detects secrets, it never exfiltrates or transmits
-them. Run it only against code you are authorized to scan. When it finds a live
-credential, **rotate it** — removing the line from the latest commit does not
-revoke a key that already leaked into git history.
+Detection is **read-only** and never transmits secrets. The only feature that
+makes outbound network calls is `verify`, and it is deliberately constrained: it
+is opt-in (a separate command requiring confirmation), contacts only each secret's
+own provider over read-only endpoints, never follows redirects, rate-limits and
+times out every call, and never logs or stores the raw value. Run the tool only
+against code you are authorized to scan. When it finds a live credential,
+**rotate it** — removing the line from the latest commit does not revoke a key
+that already leaked into git history.
 
 ## License
 

@@ -51,6 +51,11 @@ class SignatureDetector(BaseDetector):
                 }
             )
 
+    def rule_index(self) -> dict[str, dict]:
+        """Map rule_id -> compiled rule. Used by live verification to recover the
+        raw secret from a finding's line (the regex + capture group)."""
+        return {r["id"]: r for r in self._rules}
+
     def detect(self, path: str, content: str) -> list[Finding]:
         findings: list[Finding] = []
         for rule in self._rules:

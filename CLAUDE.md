@@ -11,7 +11,7 @@ tool — shared pattern intelligence, opposite direction.
 Maps to AccuKnox **SECURING SECRETS**.
 
 **Repository**: https://github.com/Krishcalin/Secrets-Scanner
-**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-4 complete (28 rules, 31 tests)
+**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-5 complete (28 rules, 41 tests)
 
 ---
 
@@ -30,6 +30,7 @@ secrets-scanner/
 │   ├── allowlist.py           # Allowlist — placeholder/example/template suppression
 │   ├── pragma.py              # inline `# pragma: allowlist secret` line suppression
 │   ├── gitignore.py           # .gitignore-aware filtering (delegates to git check-ignore)
+│   ├── verify.py              # live verification — Verifier/Runner, raw-secret recovery
 │   └── logger.py              # structlog setup (never logs raw secrets)
 ├── detectors/
 │   ├── base.py                # BaseDetector ABC (detect / line_col)
@@ -37,8 +38,9 @@ secrets-scanner/
 │   └── entropy.py             # Shannon-entropy detector (opt-in)
 ├── rules/secret_patterns.yaml # 28 signature rules + allowlist section
 ├── config/                    # settings (later phases)
-├── tests/test_scanner.py      # filesystem/detector/baseline tests (17)
-└── tests/test_git_history.py  # git-history tests (7)
+├── tests/test_scanner.py      # filesystem/detector/baseline/triage tests (24)
+├── tests/test_git_history.py  # git-history + gitignore tests (7)
+└── tests/test_verify.py       # live-verification tests (10, no network)
 ```
 
 ### Core contracts
@@ -68,6 +70,14 @@ secrets-scanner/
 - **`Baseline`** — `suppresses()` consults a fingerprint set; `write(..., update=,
   reason=)` merges into an existing baseline and records `entries` (fp → rule/path/
   reason) for auditability.
+- **Live verification (`core/verify.py`)** — `Verifier` per provider builds a
+  read-only `request(secret)` and `interpret(status)`; `VerificationRunner` owns the
+  network policy (timeout, rate-limit, dedup by secret, no-redirect opener, fail-safe
+  to `UNVERIFIED`). `collect_verifiable()` recovers the raw secret from the working
+  tree (re-match rule regex on the line, confirm via fingerprint) — raw values stay
+  in memory only, never stored. Status-clean providers only: GitHub, GitLab, OpenAI,
+  Anthropic, Stripe, SendGrid (Slack-style "200-on-invalid" APIs are intentionally
+  excluded). Sets `Finding.verification` → VALID / INVALID / UNVERIFIED / SKIPPED.
 - **`GitHistoryScanner.scan(repo)`** — parses one `git log --all -p --unified=0`
   stream; per (commit, file) reconstructs the *added* lines into a blob (keeping a
   line map for accurate new-file line numbers), runs the same detectors, dedups by
@@ -96,6 +106,9 @@ allowlist:
 - `scan --path --entropy --no-allowlist --gitignore --baseline <f> --format table|json --fail-on <sev>`
 - `history --path --entropy --no-allowlist --baseline <f> --max-commits <n> --format --fail-on`
   — scan git commit history (incl. leaked-then-removed secrets)
+- `verify --path --entropy --no-allowlist --gitignore --baseline <f> --rate-limit <s>
+  --timeout <s> [-y/--yes] --format --fail-on-valid` — scan then check if detected
+  credentials are LIVE (read-only, opt-in, confirmation required)
 - `baseline --path --entropy --gitignore [-u/--update] [--reason <r>] -o <out>`
   — snapshot/merge fingerprints to suppress later
 - top-level `--log-level` on the `cli` group (default `WARNING`)
@@ -157,10 +170,20 @@ allowlist:
 - [x] `ScanResult` line-level pragma drop happens before dedup/baseline
 - [x] 7 new pytest tests (31 total)
 
-### Phase 5 — Live verification (opt-in, safe)
-- [ ] `verify` command: confirm whether a detected credential is live
-      (AWS STS GetCallerIdentity, GitHub /user, etc.) — rate-limited, never
-      mutates, never exfiltrates; sets `Verification.VALID/INVALID`
+### Phase 5 — Live verification (opt-in, safe) (COMPLETE)
+- [x] `core/verify.py` — `Verifier` (per provider) + `VerificationRunner` (network
+      policy) + `collect_verifiable()` (raw-secret recovery from working tree)
+- [x] Providers: GitHub, GitLab, OpenAI, Anthropic, Stripe, SendGrid (status-clean)
+- [x] Read-only; no-redirect opener; per-call timeout; rate-limit; dedup by secret;
+      network errors fail safe to `UNVERIFIED` (never false `INVALID`)
+- [x] Raw secrets recovered transiently in memory, confirmed via fingerprint, never
+      stored/logged/reported
+- [x] CLI `verify` — confirmation required (`--yes` for non-interactive), refuses
+      outbound calls in a non-TTY without `--yes`; `--fail-on-valid` CI gate; Status
+      column / `verification` in JSON
+- [x] 10 new pytest tests (41 total), no network (HTTP injected)
+- Note: AWS (`aws_sts`) intentionally unverified — needs secret-key pairing + SigV4;
+  Slack excluded (auth.test returns HTTP 200 even for invalid tokens)
 
 ### Phase 6 — Reporting, hooks & GRC
 - [ ] HTML/JSON/CSV reports (reuse Guardrail reporter pattern)
