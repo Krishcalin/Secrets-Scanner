@@ -9,8 +9,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from core.baseline import Baseline
+from core.gitignore import filter_ignored
 from core.logger import get_logger
-from core.models import Finding, ScanResult
+from core.models import ScanResult
+from core.pragma import line_allowlisted
 from core.walker import walk_files
 from detectors.base import BaseDetector
 
@@ -22,14 +24,19 @@ class SecretScanner:
         self,
         detectors: list[BaseDetector],
         baseline: Baseline | None = None,
+        skip_gitignored: bool = False,
     ) -> None:
         self.detectors = detectors
         self.baseline = baseline
+        self.skip_gitignored = skip_gitignored
 
     def scan(self, root: str | Path) -> ScanResult:
         result = ScanResult(root=str(root))
         seen: set[str] = set()
-        for path in walk_files(root):
+        paths = list(walk_files(root))
+        if self.skip_gitignored:
+            paths = filter_ignored(root, paths)
+        for path in paths:
             try:
                 content = path.read_text(encoding="utf-8", errors="ignore")
             except OSError as exc:
@@ -38,9 +45,13 @@ class SecretScanner:
                 continue
             result.files_scanned += 1
             rel = str(path)
+            lines = content.split("\n")
             for det in self.detectors:
                 try:
                     for finding in det.detect(rel, content):
+                        idx = finding.line - 1
+                        if 0 <= idx < len(lines) and line_allowlisted(lines[idx]):
+                            continue
                         if finding.fingerprint in seen:
                             continue
                         if self.baseline and self.baseline.suppresses(finding):

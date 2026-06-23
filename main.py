@@ -87,15 +87,18 @@ def _emit(result: ScanResult, fmt: str, fail_on: str | None, *, history: bool) -
 @click.option("--entropy", is_flag=True, default=False, help="Also run the entropy detector.")
 @click.option("--no-allowlist", is_flag=True, default=False,
               help="Report even documentation/placeholder sample values.")
+@click.option("--gitignore", is_flag=True, default=False,
+              help="Skip git-ignored files (only inside a git work tree).")
 @click.option("--baseline", "baseline_path", default=None, help="Baseline JSON to suppress.")
 @click.option("--format", "fmt", type=click.Choice(["table", "json"]), default="table")
 @click.option("--fail-on", type=click.Choice([s.value for s in Severity]), default=None,
               help="Exit 1 if any finding is at/above this severity (CI gate).")
-def scan(path: str, entropy: bool, no_allowlist: bool, baseline_path: str | None, fmt: str,
-         fail_on: str | None) -> None:
+def scan(path: str, entropy: bool, no_allowlist: bool, gitignore: bool,
+         baseline_path: str | None, fmt: str, fail_on: str | None) -> None:
     """Scan PATH for hardcoded secrets."""
     baseline = Baseline.load(baseline_path) if baseline_path else None
-    scanner = SecretScanner(_detectors(entropy, not no_allowlist), baseline=baseline)
+    scanner = SecretScanner(_detectors(entropy, not no_allowlist), baseline=baseline,
+                            skip_gitignored=gitignore)
     _emit(scanner.scan(path), fmt, fail_on, history=False)
 
 
@@ -122,13 +125,22 @@ def history(path: str, entropy: bool, no_allowlist: bool, baseline_path: str | N
 @cli.command("baseline")
 @click.option("--path", default=".", help="File or directory to scan.")
 @click.option("--entropy", is_flag=True, default=False)
+@click.option("--gitignore", is_flag=True, default=False, help="Skip git-ignored files.")
+@click.option("-u", "--update", is_flag=True, default=False,
+              help="Merge into the existing baseline instead of overwriting.")
+@click.option("--reason", default=None, help="Note stored with newly accepted findings.")
 @click.option("-o", "--output", default=".secrets-baseline.json", help="Baseline output path.")
-def baseline(path: str, entropy: bool, output: str) -> None:
-    """Write a baseline of current findings (suppress them on future scans)."""
-    result = SecretScanner(default_detectors(entropy=entropy)).scan(path)
-    out = Baseline.write(output, result.findings)
-    console.print(f"[green]Baseline written:[/] {out} "
-                  f"({len({f.fingerprint for f in result.findings})} fingerprints)")
+def baseline(path: str, entropy: bool, gitignore: bool, update: bool,
+             reason: str | None, output: str) -> None:
+    """Write (or update) a baseline of current findings to suppress on future scans."""
+    result = SecretScanner(default_detectors(entropy=entropy),
+                           skip_gitignored=gitignore).scan(path)
+    out = Baseline.write(output, result.findings, update=update, reason=reason)
+    total = len(Baseline.load(out).fingerprints)
+    verb = "updated" if update else "written"
+    console.print(f"[green]Baseline {verb}:[/] {out} "
+                  f"({len({f.fingerprint for f in result.findings})} from this scan · "
+                  f"{total} total)")
 
 
 if __name__ == "__main__":

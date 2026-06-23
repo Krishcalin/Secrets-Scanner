@@ -24,6 +24,7 @@ from pathlib import Path
 from core.baseline import Baseline
 from core.logger import get_logger
 from core.models import Finding, ScanResult
+from core.pragma import line_allowlisted
 from detectors.base import BaseDetector
 
 log = get_logger("git-history")
@@ -167,6 +168,8 @@ class GitHistoryScanner:
             try:
                 for f in det.detect(path, content):
                     idx = f.line - 1
+                    if 0 <= idx < len(texts) and line_allowlisted(texts[idx]):
+                        continue
                     if 0 <= idx < len(line_map):
                         f.line = line_map[idx]
                     findings.append(f)

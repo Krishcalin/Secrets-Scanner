@@ -103,3 +103,28 @@ def test_history_max_commits_limit(tmp_path):
     _commit(tmp_path, "c.py", "z = 3\n", "c3")
     result = GitHistoryScanner(default_detectors(), max_commits=2).scan(tmp_path)
     assert result.commits_scanned == 2
+
+
+def test_history_inline_pragma_suppresses(tmp_path):
+    _init_repo(tmp_path)
+    _commit(tmp_path, "c.py",
+            f'K = "{FAKE_AWS_KEY}"  # pragma: allowlist secret\n', "add")
+    result = GitHistoryScanner(default_detectors()).scan(tmp_path)
+    assert not any(f.rule_id == "aws_access_key_id" for f in result.findings)
+
+
+# ── .gitignore-aware filesystem scanning (needs a repo, so it lives here) ──
+def test_scan_respects_gitignore(tmp_path):
+    from core.engine import SecretScanner
+
+    _init_repo(tmp_path)
+    (tmp_path / ".gitignore").write_text("ignored.txt\n", encoding="utf-8")
+    (tmp_path / "ignored.txt").write_text(f'KEY="{FAKE_AWS_KEY}"\n', encoding="utf-8")
+    (tmp_path / "tracked.py").write_text(f'KEY="{FAKE_AWS_KEY}"\n', encoding="utf-8")
+
+    both = SecretScanner(default_detectors()).scan(tmp_path)
+    assert len([f for f in both.findings if f.rule_id == "aws_access_key_id"]) == 2
+
+    filtered = SecretScanner(default_detectors(), skip_gitignored=True).scan(tmp_path)
+    aws = [f for f in filtered.findings if f.rule_id == "aws_access_key_id"]
+    assert len(aws) == 1 and aws[0].path.endswith("tracked.py")

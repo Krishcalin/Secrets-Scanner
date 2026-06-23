@@ -11,7 +11,7 @@ tool — shared pattern intelligence, opposite direction.
 Maps to AccuKnox **SECURING SECRETS**.
 
 **Repository**: https://github.com/Krishcalin/Secrets-Scanner
-**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-3 complete (28 rules, 24 tests)
+**Python**: 3.10+ · **License**: MIT · **Status**: Phases 1-4 complete (28 rules, 31 tests)
 
 ---
 
@@ -26,8 +26,10 @@ secrets-scanner/
 │   ├── walker.py              # walk_files() — skip binaries/noise/oversized
 │   ├── engine.py              # SecretScanner + default_detectors()
 │   ├── git_history.py         # GitHistoryScanner — scan commit diffs (added lines)
-│   ├── baseline.py            # Baseline load/write/suppress (fingerprint set)
+│   ├── baseline.py            # Baseline load/write/suppress + incremental --update
 │   ├── allowlist.py           # Allowlist — placeholder/example/template suppression
+│   ├── pragma.py              # inline `# pragma: allowlist secret` line suppression
+│   ├── gitignore.py           # .gitignore-aware filtering (delegates to git check-ignore)
 │   └── logger.py              # structlog setup (never logs raw secrets)
 ├── detectors/
 │   ├── base.py                # BaseDetector ABC (detect / line_col)
@@ -56,9 +58,16 @@ secrets-scanner/
   (redacted), fingerprint, source, entropy, verification, metadata`.
 - **`fingerprint(rule_id, secret, path)`** — stable hash (no raw secret stored);
   used for dedup and baseline suppression, independent of line moves.
-- **`SecretScanner.scan(root)`** — walk → run detectors → dedup by fingerprint →
-  apply baseline → `ScanResult`. `default_detectors(entropy=, allowlist=)` builds
-  the standard set.
+- **`SecretScanner.scan(root)`** — walk → (optional `skip_gitignored` filter) →
+  run detectors → drop inline-pragma'd lines → dedup by fingerprint → apply
+  baseline → `ScanResult`. `default_detectors(entropy=, allowlist=)` builds the set.
+- **`line_allowlisted(text)`** (`core/pragma.py`) — true when a source line carries
+  `# pragma: allowlist secret` (or `gitleaks:allow`); applied in both scanners.
+- **`filter_ignored(root, paths)`** (`core/gitignore.py`) — drops git-ignored paths
+  via one batched `git check-ignore`; no-op outside a git work tree.
+- **`Baseline`** — `suppresses()` consults a fingerprint set; `write(..., update=,
+  reason=)` merges into an existing baseline and records `entries` (fp → rule/path/
+  reason) for auditability.
 - **`GitHistoryScanner.scan(repo)`** — parses one `git log --all -p --unified=0`
   stream; per (commit, file) reconstructs the *added* lines into a blob (keeping a
   line map for accurate new-file line numbers), runs the same detectors, dedups by
@@ -84,10 +93,11 @@ allowlist:
 
 ### CLI reference
 
-- `scan --path --entropy --no-allowlist --baseline <f> --format table|json --fail-on <sev>`
+- `scan --path --entropy --no-allowlist --gitignore --baseline <f> --format table|json --fail-on <sev>`
 - `history --path --entropy --no-allowlist --baseline <f> --max-commits <n> --format --fail-on`
   — scan git commit history (incl. leaked-then-removed secrets)
-- `baseline --path --entropy -o <out>` — snapshot fingerprints to suppress later
+- `baseline --path --entropy --gitignore [-u/--update] [--reason <r>] -o <out>`
+  — snapshot/merge fingerprints to suppress later
 - top-level `--log-level` on the `cli` group (default `WARNING`)
 
 ### Design principles
@@ -137,9 +147,15 @@ allowlist:
       source/commit/author/date); shared `_emit()` render+gate with `scan`
 - [x] `ScanResult.commits_scanned`; 7 new pytest tests (24 total)
 
-### Phase 4 — Triage & suppression
-- [ ] `.gitignore`-aware walking; inline `# pragma: allowlist secret`
-- [ ] Baseline tuning + false-positive feedback loop
+### Phase 4 — Triage & suppression (COMPLETE)
+- [x] `.gitignore`-aware walking — `core/gitignore.py` `filter_ignored()` delegates
+      to `git check-ignore` (correct semantics, no new dep); `scan/baseline --gitignore`
+- [x] Inline `# pragma: allowlist secret` (+ `gitleaks:allow`) — `core/pragma.py`,
+      applied in both filesystem and git-history scans
+- [x] Baseline feedback loop — `write(update=, reason=)` merges into an existing
+      baseline; stores `entries` (fp → rule/path/reason); CLI `baseline -u/--update --reason`
+- [x] `ScanResult` line-level pragma drop happens before dedup/baseline
+- [x] 7 new pytest tests (31 total)
 
 ### Phase 5 — Live verification (opt-in, safe)
 - [ ] `verify` command: confirm whether a detected credential is live

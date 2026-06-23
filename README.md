@@ -6,14 +6,14 @@
 
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-24%20passing-brightgreen.svg)](tests/)
+[![Tests](https://img.shields.io/badge/tests-31%20passing-brightgreen.svg)](tests/)
 
 Secrets Scanner is the **defensive mirror** of the offensive
 **T1552.001 "Credentials in Files"** module in the KIZEN red-team portfolio: that
 tool finds the gaps, this one closes them — sharing the same pattern intelligence
 in the opposite direction. It maps to the AccuKnox **SECURING SECRETS** capability.
 
-**Status:** Phases 1–3 complete (filesystem + git-history scanning) ·
+**Status:** Phases 1–4 complete (filesystem + git-history scanning, triage/suppression) ·
 **Python** 3.10+ · **License** MIT
 
 ---
@@ -72,7 +72,13 @@ in the opposite direction. It maps to the AccuKnox **SECURING SECRETS** capabili
   `{{ token }}`), and obvious fixtures. Tune in the `allowlist:` section of the rule
   pack; disable entirely with `--no-allowlist`.
 - **Baseline suppression** — snapshot today's findings, then surface only *new*
-  secrets on future scans. Fingerprints are stable across line moves.
+  secrets on future scans. Fingerprints are stable across line moves. `baseline
+  --update` merges into an existing baseline so triage is **incremental**: scan,
+  fix the real leaks, fold the rest in as accepted (with an optional `--reason`).
+- **Inline pragmas** — drop a single known-safe match in place with a
+  `# pragma: allowlist secret` (or `gitleaks:allow`) comment on the line.
+- **`.gitignore`-aware** — `--gitignore` skips git-ignored files using git's own
+  `check-ignore` engine (correct semantics, no extra dependency).
 - **Fast walker** — skips binaries (null-byte sniff + extension list), files > 5 MB,
   and noise dirs (`.git`, `node_modules`, `venv`, `dist`, `vendor`, `.terraform`, …).
 
@@ -115,9 +121,15 @@ python main.py scan --path . --format json
 # CI gate — exit 1 on any HIGH-or-above finding
 python main.py scan --path . --fail-on high
 
+# Skip git-ignored files (build artifacts, local .env, …)
+python main.py scan --path . --gitignore
+
 # Create a baseline of existing findings, then scan suppressing them
 python main.py baseline --path . -o .secrets-baseline.json
 python main.py scan --path . --baseline .secrets-baseline.json
+
+# Incrementally accept remaining findings into the baseline after triage
+python main.py baseline --path . -o .secrets-baseline.json --update --reason "triaged 2026-06"
 
 # Scan the full git history (catches leaked-then-removed secrets)
 python main.py history --path .
@@ -132,6 +144,7 @@ python main.py history --path . --fail-on high       # CI gate on history too
 | `--path` | `.` | File or directory to scan |
 | `--entropy` | off | Also run the entropy detector |
 | `--no-allowlist` | off | Report documentation/placeholder values too |
+| `--gitignore` | off | Skip git-ignored files (inside a git work tree) |
 | `--baseline <file>` | — | Baseline JSON of fingerprints to suppress |
 | `--format table\|json` | `table` | Output format |
 | `--fail-on <severity>` | — | Exit 1 if any finding is at/above this severity |
@@ -182,6 +195,21 @@ commit — so deleted-but-historical secrets still surface.
 
 ---
 
+## Suppressing false positives
+
+Three layers, from broadest to most surgical:
+
+| Mechanism | Scope | When to use |
+|-----------|-------|-------------|
+| **Allowlist** (`allowlist:` in the rule pack) | every scan, by value/path regex | doc samples & template placeholders that recur everywhere |
+| **Baseline** (`--baseline` + `baseline --update`) | a known set of fingerprints | accept a repo's existing findings, then alert only on *new* ones |
+| **Inline pragma** | one line | a single intentional fixture the scanner can't distinguish from a real leak |
+
+```python
+test_key = "AKIA...................."   # pragma: allowlist secret
+demo     = "sk_live_000000000000000000"  # gitleaks:allow
+```
+
 ## Adding & tuning rules
 
 Append to [`rules/secret_patterns.yaml`](rules/secret_patterns.yaml) — no code change:
@@ -219,8 +247,10 @@ secrets-scanner/
 │   ├── walker.py               # walk_files() — skip binaries/noise/oversized
 │   ├── engine.py               # SecretScanner + default_detectors()
 │   ├── git_history.py          # GitHistoryScanner — scan commit diffs (added lines)
-│   ├── baseline.py             # Baseline load/write/suppress (fingerprint set)
+│   ├── baseline.py             # Baseline load/write/suppress + incremental --update
 │   ├── allowlist.py            # Allowlist — placeholder/example/template suppression
+│   ├── pragma.py               # inline `# pragma: allowlist secret` suppression
+│   ├── gitignore.py            # .gitignore-aware filtering (git check-ignore)
 │   └── logger.py               # structlog setup (never logs raw secrets)
 ├── detectors/
 │   ├── base.py                 # BaseDetector ABC (detect / line_col)
@@ -241,7 +271,7 @@ See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
 | 1 | Filesystem scanning foundation | ✅ Complete |
 | 2 | Detector breadth (28 rules, entropy gating, verifier hints, allowlist) | ✅ Complete |
 | 3 | Git-history scanning (leaked-then-removed secrets) | ✅ Complete |
-| 4 | Triage & suppression (`.gitignore`-aware, inline `# pragma: allowlist secret`) | Planned |
+| 4 | Triage & suppression (`.gitignore`-aware, inline pragmas, baseline merge) | ✅ Complete |
 | 5 | Safe live verification (AWS STS, GitHub `/user`, … — rate-limited, read-only) | Planned |
 | 6 | HTML/JSON/CSV reports, pre-commit hook, CI gate, CWE-798/OWASP/PCI-DSS mapping | Planned |
 
@@ -250,7 +280,7 @@ See [CLAUDE.md](CLAUDE.md) for architecture detail and the full phase roadmap.
 ## Testing
 
 ```bash
-pytest                # 24 tests
+pytest                # 31 tests
 pytest --cov=core --cov=detectors
 ```
 

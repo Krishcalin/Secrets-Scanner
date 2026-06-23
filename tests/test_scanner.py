@@ -5,7 +5,8 @@ from __future__ import annotations
 from core.allowlist import Allowlist
 from core.baseline import Baseline
 from core.engine import SecretScanner, default_detectors
-from core.models import Severity, fingerprint, redact
+from core.models import Finding, Severity, fingerprint, redact
+from core.pragma import line_allowlisted
 from detectors.entropy import EntropyDetector, shannon_entropy
 from detectors.signature import SignatureDetector
 
@@ -142,3 +143,52 @@ def test_allowlist_default_loads_value_patterns():
     assert al.allows_value("AKIAIOSFODNN7EXAMPLE")
     assert al.allows_value("changeme")
     assert not al.allows_value("Zk9Q2xL7mP4rT1vY8wB3nC6dF0aH5jK")
+
+
+# ── Phase 4: triage & suppression ────────────────────────────────────────
+def test_line_allowlisted_recognizes_pragmas():
+    assert line_allowlisted('k = "x"  # pragma: allowlist secret')
+    assert line_allowlisted("token = y  // gitleaks:allow")
+    assert not line_allowlisted('k = "x"  # ordinary comment')
+
+
+def test_inline_pragma_suppresses_only_marked_line(tmp_path):
+    (tmp_path / "a.py").write_text(
+        f'k = "{FAKE_AWS_KEY}"  # pragma: allowlist secret\n', encoding="utf-8")
+    (tmp_path / "b.py").write_text(f'k = "{FAKE_AWS_KEY}"\n', encoding="utf-8")
+    result = SecretScanner(default_detectors()).scan(tmp_path)
+    aws = [f for f in result.findings if f.rule_id == "aws_access_key_id"]
+    assert len(aws) == 1 and aws[0].path.endswith("b.py")
+
+
+def _fp_finding(rule_id, secret, path):
+    return Finding(rule_id, "d", Severity.HIGH, path, 1, 1, "p",
+                   fingerprint(rule_id, secret, path))
+
+
+def test_baseline_update_merges_findings(tmp_path):
+    f1 = _fp_finding("r1", "s1", "a.py")
+    f2 = _fp_finding("r2", "s2", "b.py")
+    bp = tmp_path / "bl.json"
+    Baseline.write(bp, [f1])
+    Baseline.write(bp, [f2], update=True)        # merge, don't overwrite
+    bl = Baseline.load(bp)
+    assert bl.suppresses(f1) and bl.suppresses(f2)
+
+
+def test_baseline_overwrite_drops_old(tmp_path):
+    f1 = _fp_finding("r1", "s1", "a.py")
+    f2 = _fp_finding("r2", "s2", "b.py")
+    bp = tmp_path / "bl.json"
+    Baseline.write(bp, [f1])
+    Baseline.write(bp, [f2])                      # no update → replaces
+    bl = Baseline.load(bp)
+    assert not bl.suppresses(f1) and bl.suppresses(f2)
+
+
+def test_baseline_stores_entry_metadata(tmp_path):
+    f1 = _fp_finding("aws_access_key_id", "s1", "a.py")
+    bp = tmp_path / "bl.json"
+    Baseline.write(bp, [f1], reason="known test fixture")
+    entry = Baseline.load(bp).entries[f1.fingerprint]
+    assert entry["rule_id"] == "aws_access_key_id" and entry["reason"] == "known test fixture"
